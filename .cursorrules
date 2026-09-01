@@ -1,0 +1,16 @@
+Proje: mangolab case study, Junior SWE. Python + FastAPI.
+Tek endpoint: GET /tools/convert?amount=&from=&to=&date=
+
+KURALLAR
+- Kapsamı büyütme. Docker, CI, DB, auth, UI, ekstra endpoint YOK.
+- Upstream base yalnızca FX_UPSTREAM_BASE env'inden, default https://api.frankfurter.dev
+  Gerçek host hiçbir yerde hardcode edilmeyecek.
+- Port yalnızca PORT env'inden, default 8080.
+- "from" Python keyword'ü: Query(alias="from") kullan.
+- rate_date DAİMA upstream payload'ının "date" alanından okunur. Asla uydurulmaz.
+  asked_date çağıranın istediği tarihtir. İkisi farklı olabilir, olay bu.
+- Para hesabı Decimal ile. Rate yuvarlanmaz, sadece sonuç 2 haneye quantize edilir.
+- Hata: non-2xx + {"error": "<kod>", "message": "<cümle>"}
+  FastAPI'nin default 422 gövdesi bu şemaya uymaz; RequestValidationError handler'ı yaz.
+- Testler ağ olmadan geçmeli: httpx.MockTransport. Gerçek istek atan test YOK.
+- Tek seferde bir küçük değişiklik yap. İstenmeyen refactor yapma.
