@@ -237,3 +237,57 @@ def test_timeout_returns_upstream_timeout(client: TestClient) -> None:
 
     assert response.status_code == 504
     assert response.json()["error"] == "upstream_timeout"
+
+
+def test_date_before_series_start_returns_error(client: TestClient) -> None:
+    response = client.get(
+        "/tools/convert",
+        params={"amount": "10", "from": "EUR", "to": "TRY", "date": "1990-01-01"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "date_before_series_start"
+
+
+def test_cache_key_includes_date(client: TestClient) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/v1/2026-08-28":
+            return httpx.Response(
+                200,
+                json={
+                    "amount": 1.0,
+                    "base": "EUR",
+                    "date": "2026-08-28",
+                    "rates": {"TRY": 47.1234},
+                },
+            )
+        if path == "/v1/2026-08-27":
+            return httpx.Response(
+                200,
+                json={
+                    "amount": 1.0,
+                    "base": "EUR",
+                    "date": "2026-08-27",
+                    "rates": {"TRY": 46.0000},
+                },
+            )
+        return httpx.Response(404, json={"message": "not found"})
+
+    transport = httpx.MockTransport(handler)
+    client.app.state.http_client = httpx.AsyncClient(
+        transport=transport, base_url="http://fake-upstream"
+    )
+
+    first = client.get(
+        "/tools/convert",
+        params={"amount": "1", "from": "EUR", "to": "TRY", "date": "2026-08-28"},
+    )
+    second = client.get(
+        "/tools/convert",
+        params={"amount": "1", "from": "EUR", "to": "TRY", "date": "2026-08-27"},
+    )
+
+    assert first.json()["rate"] != second.json()["rate"]
+    assert first.json()["rate_date"] == "2026-08-28"
+    assert second.json()["rate_date"] == "2026-08-27"
