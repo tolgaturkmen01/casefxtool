@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
@@ -23,7 +25,15 @@ from fx import (
 TWOPLACES = Decimal("0.01")
 CURRENCY_RE = re.compile(r"^[A-Za-z]{3}$")
 
-app = FastAPI(title="fx-tool", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.http_client = httpx.AsyncClient(base_url=FX_UPSTREAM_BASE, timeout=10.0)
+    yield
+    await app.state.http_client.aclose()
+
+
+app = FastAPI(title="fx-tool", version="0.1.0", lifespan=lifespan)
 
 
 def error_response(status_code: int, error: str, message: str) -> JSONResponse:
@@ -35,7 +45,7 @@ async def handle_validation_error(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     return error_response(
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
         "validation_error",
         validation_message(exc),
     )
@@ -57,21 +67,11 @@ def validation_message(exc: RequestValidationError) -> str:
     return f"{field}: {detail}"
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    app.state.http_client = httpx.AsyncClient(base_url=FX_UPSTREAM_BASE, timeout=10.0)
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    await app.state.http_client.aclose()
-
-
 def normalize_currency(code: str, field_name: str) -> str:
     normalized = code.upper()
     if not CURRENCY_RE.match(code):
         raise ServiceError(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "validation_error",
             f"{field_name}: must be a 3-letter currency code.",
         )
@@ -81,14 +81,14 @@ def normalize_currency(code: str, field_name: str) -> str:
 def validate_amount(value: Decimal) -> Decimal:
     if value <= 0:
         raise ServiceError(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "validation_error",
             "amount: must be greater than zero.",
         )
     exponent = value.as_tuple().exponent
     if isinstance(exponent, int) and exponent < -2:
         raise ServiceError(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "validation_error",
             "amount: must have at most 2 decimal places.",
         )
@@ -108,7 +108,7 @@ async def convert(
 
     if base == target:
         raise ServiceError(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "same_currency",
             "Source and target currency must be different.",
         )
@@ -116,13 +116,13 @@ async def convert(
     if asked_date is not None:
         if asked_date > date.today():
             raise ServiceError(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "date_in_future",
                 "The requested date is in the future; no rate has been published for it yet.",
             )
         if asked_date < date(1999, 1, 4):
             raise ServiceError(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "date_before_series_start",
                 "The ECB series starts on 1999-01-04; no rate exists for earlier dates.",
             )
