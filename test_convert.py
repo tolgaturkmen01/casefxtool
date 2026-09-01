@@ -123,10 +123,10 @@ def test_future_date_returns_error(client: TestClient) -> None:
         params={"amount": "10", "from": "EUR", "to": "TRY", "date": "2099-01-01"},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 422
     assert response.json() == {
-        "error": "rate_not_found",
-        "message": "No exchange rate is available for the requested date or currency.",
+        "error": "date_in_future",
+        "message": "The requested date is in the future; no rate has been published for it yet.",
     }
 
 

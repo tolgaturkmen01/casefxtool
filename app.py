@@ -113,6 +113,20 @@ async def convert(
             "Source and target currency must be different.",
         )
 
+    if asked_date is not None:
+        if asked_date > date.today():
+            raise ServiceError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "date_in_future",
+                "The requested date is in the future; no rate has been published for it yet.",
+            )
+        if asked_date < date(1999, 1, 4):
+            raise ServiceError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "date_before_series_start",
+                "The ECB series starts on 1999-01-04; no rate exists for earlier dates.",
+            )
+
     date_path = str(asked_date) if asked_date is not None else "latest"
     client: httpx.AsyncClient = app.state.http_client
     payload = await fetch_rate_payload(
