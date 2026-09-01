@@ -1,45 +1,37 @@
-# Case study — Junior Software Engineer at mangolab
+# fx-tool
 
-Two small tasks, **about two and a half hours in total.** Please do not spend
-your weekend on this. If you run out of time, stop and write down what you would
-have done next — that answer counts too.
+A single-endpoint HTTP service that converts an amount between two currencies
+using ECB rates published via [frankfurter.dev](https://frankfurter.dev).
 
-Use Claude Code, Cursor, Copilot — whatever you normally use. That is how we work
-every day, and we would rather see you use it well than watch you avoid it. The
-only thing we ask is that you know your own code.
+## Run
 
-**Start by clicking "Use this template"** to create your own repository, then
-work there.
+```bash
+./run.sh
+```
 
----
+Listens on `PORT` (default `8080`). Upstream comes from `FX_UPSTREAM_BASE`
+(default `https://api.frankfurter.dev`); the real host is not hardcoded anywhere.
 
-## Part A — build (about 90 minutes)
+## Test
 
-A small HTTP service — Python + FastAPI preferred, TypeScript is fine — with one
-endpoint an AI agent could call as a tool:
+```bash
+./test.sh
+```
+
+Tests never touch the network — the upstream is faked with `httpx.MockTransport`.
+They pass with `FX_UPSTREAM_BASE` pointing at a closed port.
+
+## Endpoint
 
 ```
 GET /tools/convert?amount=250&from=EUR&to=TRY&date=2026-08-28
 ```
 
-It answers using the public [Frankfurter API](https://frankfurter.dev) —
-European Central Bank rates, no API key, no signup.
-
-### Three things are fixed, so that we can run every submission the same way
-
-| | |
-|---|---|
-| Upstream URL | from the `FX_UPSTREAM_BASE` environment variable, defaulting to `https://api.frankfurter.dev`. **Nothing may hardcode the real host** — we point this at a fake upstream when reviewing. |
-| Port | from the `PORT` environment variable, default `8080` |
-| Scripts | `./run.sh` starts the service, `./test.sh` runs the tests. Both are in this template, unimplemented. |
-
-### The response
-
-On success, 200 with:
+`date` is optional; omitting it uses the latest published rates.
 
 ```json
 {
-  "amount": 250,
+  "amount": 250.0,
   "from": "EUR",
   "to": "TRY",
   "rate": 47.1234,
@@ -50,80 +42,49 @@ On success, 200 with:
 }
 ```
 
-`rate_date` is **the date the rate you used actually belongs to.** `asked_date`
-is what the caller asked for. They are not always the same, and that difference
-is the point of this task.
+`rate_date` is read from the upstream payload — it is the date the rate actually
+belongs to, never the date that was asked for. `asked_date` echoes the request
+(`null` when no date was given). When the two differ, the caller can see it and
+tell the customer which day the number is from.
 
-On failure, a non-2xx status and:
+## Behaviour
 
-```json
-{ "error": "<short_machine_code>", "message": "<a sentence a person could read>" }
-```
+| Case | Response |
+|---|---|
+| Weekend or holiday | 200. The upstream returns the previous published day; `rate_date` shows that day and differs from `asked_date`. |
+| Date in the future | 422 `date_in_future`. Rejected before contacting the upstream. |
+| Date before 1999-01-04 | 422 `date_before_series_start`. Rejected before contacting the upstream. |
+| Currency code not 3 letters | 422 `validation_error` |
+| Currency code unknown to the upstream | 404 `rate_not_found` |
+| `from` equals `to` | 422 `same_currency`. No upstream call. |
+| `amount` missing | 422 `validation_error` |
+| `amount` zero or negative | 422 `validation_error` |
+| `amount` with more than 2 decimals | 422 `validation_error` |
+| Upstream times out | 504 `upstream_timeout` |
+| Upstream unreachable | 502 `upstream_unavailable` |
+| Upstream returns 5xx | 502 `upstream_error` |
+| Upstream returns non-JSON or an incomplete payload | 502 `upstream_invalid_response` |
 
-List your error codes in your README.
+Every failure returns a non-2xx status and `{"error": "...", "message": "..."}`.
+The service never invents a rate and never returns a rate labelled with a date it
+does not belong to.
 
-### The part that matters
+## Error codes
 
-The caller is a language model talking to a paying customer, so **a wrong number
-is worse than no number.** Decide — and implement — what happens when:
+| Code | Status |
+|---|---|
+| `validation_error` | 422 |
+| `same_currency` | 422 |
+| `date_in_future` | 422 |
+| `date_before_series_start` | 422 |
+| `rate_not_found` | 404 |
+| `upstream_timeout` | 504 |
+| `upstream_unavailable` | 502 |
+| `upstream_error` | 502 |
+| `upstream_invalid_response` | 502 |
 
-- the ECB published no rate for the date asked (weekends, holidays);
-- the date is in the future, or before the series starts;
-- the currency code does not exist, or `from` and `to` are the same;
-- the upstream is slow, returns 500, or returns something that is not JSON;
-- `amount` is missing, zero, negative, or has ten decimal places.
+## Caching
 
-Your endpoint must never invent a rate, and must never present a rate as
-belonging to a date it does not belong to. Note that the upstream itself tells
-you which date its rates are from — read it. If you choose to answer with an
-earlier published rate, the response has to make that visible, because the model
-has to be able to tell the customer which day the number is from.
-
-### Also required
-
-- **Tests that pass with no network at all** — fake the upstream. We run
-  `./test.sh` with `FX_UPSTREAM_BASE` pointing at a closed port.
-- A README of your own we can follow in under a minute: how to run it, how to
-  run the tests, your error codes, and what your endpoint does in each of the
-  cases above.
-- A repeat of the same question should not re-ask the upstream.
-- `NOTES.md`, one page. The skeleton is in this repo.
-
-### Not required, not scored
-
-Auth, a database, a UI, a Dockerfile, CI, deployment, more endpoints. Adding them
-will not help you; a smaller thing done carefully will.
-
----
-
-## Part B — review (about 45 minutes)
-
-`tool.py` in this repository is a working version of the same service, written
-quickly with an AI assistant. It runs. **Review it as if it were going live
-tomorrow for a customer who pays us.**
-
-Fill in `REVIEW.md`, one page:
-
-- what is wrong, and what it does to a **customer** — not to a linter;
-- how you would verify each finding;
-- your findings **ranked**, and which single one you would fix before shipping
-  tonight.
-
-Fewer findings, ranked and explained, beat a long list. If something looks
-suspicious but is actually fine, saying so is worth as much as finding a real
-defect.
-
----
-
-## Submitting
-
-Reply to our email with a link to your repository. Commit in small steps — the
-history is part of what we read. Five days is plenty; if you need more, just say
-so.
-
-Any question about this brief, ask. An unclear requirement is our fault, not a
-test.
-
----
-
-<sub>mangolab — Mango Yazılım Teknolojileri Ltd. Şti. · [mangolab.ai/careers](https://mangolab.ai/careers)</sub>
+Successful upstream payloads are cached in-process, keyed by date, base, and
+target. A repeated question does not re-ask the upstream. Failures are not
+cached.
